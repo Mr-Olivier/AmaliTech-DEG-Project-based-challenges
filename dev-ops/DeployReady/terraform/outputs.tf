@@ -33,3 +33,8 @@ output "cloudwatch_alarm_name" {
   description = "CloudWatch alarm name — view in: AWS Console → CloudWatch → Alarms"
   value       = aws_cloudwatch_metric_alarm.health_check.alarm_name
 }
+
+output "security_group_id" {
+  description = "Add as SG_ID in GitHub secrets — used by the pipeline to open/close port 22"
+  value       = aws_security_group.app.id
+}
