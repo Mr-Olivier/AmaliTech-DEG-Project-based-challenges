@@ -1,141 +1,129 @@
-# DeployReady
+# Kora Analytics API
 
-This challenge is designed to test your understanding of core DevOps practices: containerisation, automated pipelines, and cloud deployment.
-
----
-
-## 1. Business Context
-
-**Client:** Kora Analytics
-**Industry:** SaaS — Data dashboards for logistics companies
-
-### The Problem
-
-Every time the Kora team wants to deploy a new version of their app, a developer manually SSHs into the server, pulls the code, and restarts the process by hand. There are no automated tests before a release and no way to tell if a deploy broke something until a customer complains.
-
-### Your Role
-
-You are joining as their first DevOps engineer. The application code already works — your job is to **containerise it, automate the delivery pipeline, and get it running on a cloud platform** (AWS, GCP, Azure, or any other cloud provider you are familiar with).
+A Node.js REST API containerised with Docker, deployed to AWS EC2 through a GitHub Actions pipeline, and monitored with CloudWatch.
 
 ---
 
-## 2. The Application
+## How it works
 
-A simple Node.js API is provided in the [`app/`](./app/) directory. It has three endpoints:
+```
+Push to main
+     │
+     ▼
+GitHub Actions
+  1. npm test          → stops here if any test fails
+  2. docker build      → pushes image to Amazon ECR (tagged with commit SHA)
+  3. ssh deploy        → pulls new image on EC2, restarts container, checks /health
+                         → rolls back to the previous image if /health fails
 
-| Method | Route      | Description                            |
-| ------ | ---------- | -------------------------------------- |
-| GET    | `/health`  | Returns `{ "status": "ok" }`           |
-| GET    | `/metrics` | Returns uptime and memory usage        |
-| POST   | `/data`    | Accepts a JSON body and echoes it back |
+EC2 t3.micro (Ubuntu 22.04, us-east-1)
+  └─ Docker container on port 80
+       ├─ GET  /health   → { "status": "ok" }
+       ├─ GET  /metrics  → uptime and memory stats
+       └─ POST /data     → echoes the JSON body back
 
-Run it locally:
-
-```bash
-cd app
-npm install
-npm start
+CloudWatch
+  └─ cron job runs every 60s → hits /health → sends 1 or 0 to CloudWatch
+     alarm fires if 0 appears twice in a row (2 minutes of downtime)
 ```
 
-Do not change the application logic. Your work is everything around it.
+---
+
+## Project structure
+
+```
+DeployReady/
+├── app/                  Node.js Express app (not modified)
+├── terraform/            All AWS infrastructure as code
+│   ├── main.tf
+│   ├── variables.tf
+│   ├── outputs.tf
+│   ├── user_data.sh      installs Docker, AWS CLI, and health-check cron on boot
+│   └── terraform.tfvars.example
+├── .github/workflows/
+│   └── deploy.yml        CI/CD pipeline
+├── Dockerfile
+├── docker-compose.yml
+├── .env.example
+├── DEPLOYMENT.md         infrastructure docs and bonus writeup
+└── AWS_SETUP.md          step-by-step guide to set up AWS and deploy
+```
 
 ---
 
-## 3. The Assignment
+## Run locally
 
-### Part 1 — Containerise the App
+```bash
+cp .env.example .env
+docker compose up --build
 
-**Deliverables:** A `Dockerfile` and a `docker-compose.yml` in the root of your repository.
+curl http://localhost:3000/health
+# { "status": "ok" }
+```
 
-**Dockerfile requirements:**
+Run the tests:
 
-- The app must run inside a Docker container.
-- The container must accept a `PORT` environment variable.
-- The container must **not** run as the `root` user.
-
-**Docker Compose requirements:**
-
-- Define the app as a service in `docker-compose.yml`.
-- Map port `3000` on the host to the container.
-- Pass the `PORT` variable via an `.env` file (include a `.env.example` with placeholder values).
-- Running the following must start a working API:
-  ```bash
-  docker compose up --build
-  ```
+```bash
+cd app && npm install && npm test
+```
 
 ---
 
-### Part 2 — Automate the Pipeline
+## Deploy to AWS
 
-**Deliverable:** A `.github/workflows/deploy.yml` GitHub Actions workflow.
+See **`AWS_SETUP.md`** for the full walkthrough. The short version:
 
-The pipeline must run these steps **in order** on every push to `main`:
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars
+# fill in: your_ip, ssh_public_key_path, and optionally alert_email
 
-1. **Test** — Run `npm test`. If tests fail, the pipeline stops. Nothing gets deployed.
-2. **Build** — Build the Docker image and tag it with the Git commit SHA.
-3. **Push** — Push the image to a container registry (GitHub Container Registry, AWS ECR, GCR, ACR, or equivalent).
-4. **Deploy** — Pull the new image on your cloud server and restart the container.
+terraform init && terraform apply
+```
 
-Additional requirements:
-
-- Secrets (SSH key, registry token) must be stored as **GitHub repository secrets** — never in the code.
-- Add a short comment above each step in the YAML explaining what it does.
+Then add the four outputs as GitHub repository secrets (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `EC2_HOST`, `EC2_SSH_KEY`) and push to `main`.
 
 ---
 
-### Part 3 — Deploy to the Cloud
+## AWS resources (all Free Tier)
 
-**Deliverable:** A running service on a cloud platform and a short `DEPLOYMENT.md` explaining your setup.
-
-Use **AWS, GCP, Azure, or any other cloud provider you are familiar with**. Provision the following (via the cloud console is fine):
-
-- A **virtual machine** (e.g. AWS EC2 `t2.micro`, GCP `e2-micro`, Azure B1s) with Docker installed.
-- A **firewall / security group** that allows:
-  - HTTP on port 80 from anywhere
-  - SSH on port 22 **from your IP only** — not open to the world
-- A **service account / IAM user or role** for the pipeline with only the permissions it needs.
-
-At submission time, `GET http://<your-server-ip>/health` must return `{ "status": "ok" }`.
-
-Document in `DEPLOYMENT.md`:
-
-- Which cloud provider and service you used, and why
-- How you set up the virtual machine
-- How you installed Docker and pulled your image
-- How to check if the container is running
-- How to view the application logs
+| Resource | Free Tier |
+|---|---|
+| EC2 t3.micro | 750 h/month for 12 months |
+| Elastic IP | free while attached to a running instance |
+| ECR | 500 MB/month |
+| CloudWatch alarm | 10 alarms/month free |
+| CloudWatch metric | 10 custom metrics/month free |
+| IAM, security groups | always free |
 
 ---
 
-## 4. Bonus (Optional)
+## Design decisions
 
-Pick **one** of the following if you want to go further:
+**node:20-alpine** — smallest official Node image; keeps the ECR image under 200 MB.
 
-- **Use Terraform** (or your cloud's IaC tool) to provision the VM and firewall rules instead of the console.
-- **Add a cloud monitoring alarm** (e.g. AWS CloudWatch, GCP Cloud Monitoring, Azure Monitor) that triggers if `/health` stops responding.
-- **Implement a rollback step** in the pipeline that re-deploys the previous image if the health check fails after deploy.
+**Non-root container user** — running as root inside a container is a security risk even if the container is isolated.
 
-Describe what you added and why in your `DEPLOYMENT.md`.
+**ECR over Docker Hub** — native AWS IAM integration means the EC2 server can pull images using its role, with no credentials stored on disk.
 
----
+**Terraform** — all infrastructure is defined in one file and can be recreated or destroyed with a single command.
 
-## 5. Submission Instructions
+**Rollback** — the deploy script saves the current image tag before swapping containers. If `/health` fails after the new container starts, the old one is brought back automatically.
 
-1. **Fork** this repository.
-2. Complete all three parts in your fork.
-3. **Replace this README** with your own documentation (architecture overview, setup steps, decisions made).
-4. Submit your repo link via the [online form](https://forms.cloud.microsoft/e/f3FF83LVz3).
+**CloudWatch custom metric** — a standard EC2 status check only tells you if the instance is alive. The cron-based custom metric actually tests the HTTP endpoint, so a crashed container triggers the alarm even while the instance is still running.
 
 ---
 
-## ⚠️ Pre-Submission Checklist
+## Submission checklist
 
-- [ ] `docker compose up --build` starts the app locally
-- [ ] A `.env.example` file is committed (the real `.env` is not)
-- [ ] At least one successful pipeline run is visible in the GitHub Actions tab
-- [ ] `GET /health` on your cloud server's public IP returns 200
-- [ ] No secrets or `.pem` files committed to the repository
-- [ ] SSH port 22 is **not** open to the world (`0.0.0.0/0`)
-- [ ] `DEPLOYMENT.md` is present and covers the four points in Part 3
-- [ ] This README has been replaced with your own documentation
-- [ ] Commit history shows progress over time (not a single upload commit)
+- [x] `docker compose up --build` starts the app
+- [x] `.env.example` committed, real `.env` gitignored
+- [x] Pipeline: test → build → push → deploy (stops on failure)
+- [x] All secrets stored in GitHub repository secrets
+- [x] SSH port 22 not open to `0.0.0.0/0`
+- [x] `DEPLOYMENT.md` covers VM setup, Docker, container check, and logs
+- [x] Bonus: Terraform provisions all infrastructure
+- [x] Bonus: CloudWatch alarm triggers if `/health` stops responding
+- [x] Bonus: Pipeline rolls back automatically on health check failure
+- [ ] At least one successful pipeline run visible in GitHub Actions
+- [ ] `GET http://<EC2_PUBLIC_IP>/health` returns `{"status":"ok"}`
