@@ -1,0 +1,13 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored and will never be committed.
+
+aws_region          = "us-east-1"
+ecr_repository_name = "kora-analytics-api"
+
+# find your IP at https://whatismyip.com
+your_ip = "YOUR_PUBLIC_IP_HERE"
+
+ssh_public_key_path = "~/.ssh/id_rsa.pub"
+
+# set this to receive an email when the CloudWatch alarm fires (leave empty to skip)
+alert_email = ""
