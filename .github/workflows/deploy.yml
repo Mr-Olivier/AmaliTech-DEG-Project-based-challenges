@@ -12,7 +12,6 @@ env:
   ECR_REPOSITORY: kora-analytics-api
 
 jobs:
-  # step 1 — run tests first. if they fail, nothing gets built or deployed
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -21,7 +20,7 @@ jobs:
       # check out the code
       - uses: actions/checkout@v4
 
-      # use node 20 to match the container image
+      # use v20 to match node:20-alpine in the Dockerfile
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -29,17 +28,16 @@ jobs:
           cache: "npm"
           cache-dependency-path: dev-ops/DeployReady/app/package-lock.json
 
-      # install dependencies including jest and supertest
+      # install jest and supertest
       - name: Install dependencies
         run: npm ci
         working-directory: dev-ops/DeployReady/app
 
-      # run the test suite — pipeline stops here if any test fails
+      # stops the pipeline here if any test fails
       - name: Run tests
         run: npm test
         working-directory: dev-ops/DeployReady/app
 
-  # step 2 — build the Docker image and push it to ECR
   build-and-push:
     name: Build & Push
     runs-on: ubuntu-latest
@@ -52,7 +50,7 @@ jobs:
       # check out the code
       - uses: actions/checkout@v4
 
-      # log in to AWS using credentials stored in GitHub secrets
+      # authenticate the runner with AWS using repository secrets
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -60,12 +58,12 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # get a short-lived login token for ECR
+      # exchange AWS credentials for a short-lived ECR login token
       - name: Log in to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # build and tag the image with the commit SHA so every push is traceable
+      # tag with the commit SHA so each deploy is traceable in ECR
       - name: Build, tag, and push image to ECR
         id: build-image
         env:
@@ -82,14 +80,13 @@ jobs:
 
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-  # step 3 — pull the new image on the server, restart the container, check /health
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
     needs: build-and-push
 
     steps:
-      # configure AWS so we can call EC2 APIs to manage the security group
+      # re-authenticate — this is a separate job from build-and-push
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -97,7 +94,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      # get this runner's public IP and open port 22 only for that IP
+      # temporarily open port 22 for this runner's IP only — closed again in the final step
       - name: Open SSH port for this runner
         run: |
           RUNNER_IP=$(curl -sf https://api.ipify.org)/32
@@ -106,7 +103,7 @@ jobs:
             --group-id ${{ secrets.SG_ID }} \
             --protocol tcp --port 22 --cidr $RUNNER_IP
 
-      # ssh into the EC2 server and run the deploy script
+      # pull the new image, swap containers, roll back if /health fails
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1
         env:
@@ -118,18 +115,15 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           envs: NEW_IMAGE,AWS_REGION
           script: |
-            # log in to ECR using the server's IAM role — no credentials stored on disk
             ECR_REGISTRY=$(echo $NEW_IMAGE | cut -d'/' -f1)
+            # uses the server's IAM role — no static credentials on disk
             aws ecr get-login-password --region $AWS_REGION | \
               docker login --username AWS --password-stdin $ECR_REGISTRY
 
-            # save the current image tag so we can roll back to it if needed
             PREV_IMAGE=$(docker inspect kora-api --format='{{.Config.Image}}' 2>/dev/null || echo "")
 
-            # pull the new image
             docker pull $NEW_IMAGE
 
-            # stop and remove the old container, then start the new one
             docker stop kora-api 2>/dev/null || true
             docker rm   kora-api 2>/dev/null || true
             docker run -d \
@@ -139,13 +133,11 @@ jobs:
               --restart unless-stopped \
               $NEW_IMAGE
 
-            # wait for the app to start, then check /health
             sleep 15
             if curl -sf http://localhost/health; then
               echo "Deploy succeeded"
               [ -n "$PREV_IMAGE" ] && docker rmi "$PREV_IMAGE" 2>/dev/null || true
             else
-              # health check failed — bring the old container back
               echo "Health check failed, rolling back"
               docker stop kora-api 2>/dev/null || true
               docker rm   kora-api 2>/dev/null || true
@@ -161,7 +153,7 @@ jobs:
               exit 1
             fi
 
-      # always remove the runner's IP from the security group — even if deploy failed
+      # always runs — removes the firewall rule even if deploy failed
       - name: Close SSH port
         if: always()
         run: |
