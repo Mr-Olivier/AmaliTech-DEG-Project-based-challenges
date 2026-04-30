@@ -1,4 +1,4 @@
-# Copy this file to terraform.tfvars and fill in your values.
+# Copy to terraform.tfvars and fill in your values.
 # terraform.tfvars is gitignored and will never be committed.
 
 aws_region          = "us-east-1"
@@ -9,5 +9,5 @@ your_ip = "YOUR_PUBLIC_IP_HERE"
 
 ssh_public_key_path = "~/.ssh/id_rsa.pub"
 
-# set this to receive an email when the CloudWatch alarm fires (leave empty to skip)
+# email for CloudWatch alarm notifications (leave blank to skip)
 alert_email = ""
