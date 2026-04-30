@@ -45,8 +45,7 @@ DeployReady/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
-├── DEPLOYMENT.md         infrastructure docs and bonus writeup
-└── AWS_SETUP.md          step-by-step guide to set up AWS and deploy
+└── DEPLOYMENT.md         infrastructure docs and bonus writeup
 ```
 
 ---
@@ -71,8 +70,6 @@ cd app && npm install && npm test
 
 ## Deploy to AWS
 
-See **`AWS_SETUP.md`** for the full walkthrough. The short version:
-
 ```bash
 cd terraform
 cp terraform.tfvars.example terraform.tfvars
@@ -81,7 +78,15 @@ cp terraform.tfvars.example terraform.tfvars
 terraform init && terraform apply
 ```
 
-Then add the four outputs as GitHub repository secrets (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `EC2_HOST`, `EC2_SSH_KEY`) and push to `main`.
+Then add these five values as GitHub repository secrets and push to `main`:
+
+| Secret | Source |
+|---|---|
+| `AWS_ACCESS_KEY_ID` | `terraform output github_actions_access_key_id` |
+| `AWS_SECRET_ACCESS_KEY` | `terraform output -raw github_actions_secret_access_key` |
+| `EC2_HOST` | `terraform output ec2_public_ip` |
+| `EC2_SSH_KEY` | full contents of `~/.ssh/id_rsa` |
+| `SG_ID` | `terraform output security_group_id` |
 
 ---
 
