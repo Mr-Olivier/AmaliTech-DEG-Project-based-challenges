@@ -8,3 +8,4 @@ node_modules/
 .terraform.lock.hcl
 *.pem
 *.key
+AWS_SETUP.md
