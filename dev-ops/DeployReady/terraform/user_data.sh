@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs once on first boot. Installs Docker, AWS CLI, and a health-check cron job.
+# First-boot setup: installs Docker, AWS CLI v2, and a CloudWatch health-check cron job.
 set -euo pipefail
 
 apt-get update -y
@@ -28,7 +28,7 @@ unzip -q /tmp/awscliv2.zip -d /tmp
 /tmp/aws/install
 rm -rf /tmp/aws /tmp/awscliv2.zip
 
-# health check script — hits /health every minute and sends 1 (up) or 0 (down) to CloudWatch
+# runs every minute, pushes 1 (up) or 0 (down) to CloudWatch
 cat > /usr/local/bin/health-check.sh << 'SCRIPT'
 #!/bin/bash
 RESULT=0
