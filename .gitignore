@@ -1,0 +1,6 @@
+
+# Terraform
+dev-ops/DeployReady/terraform/terraform.tfstate
+dev-ops/DeployReady
+  /terraform/terraform.tfstate.backup
+dev-ops/DeployReady/terraform/.terraform/
